@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Space Shooter</title>
+  <style>
+    body { margin:0; background:#000; overflow:hidden; touch-action:none; }
+    canvas { display:block; }
+    #ui { position:absolute; top:10px; left:10px; color:#fff; font-family:sans-serif; z-index:10; }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div>Score: <span id="score">0</span></div>
+  </div>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    // Telegram WebApp init - FIXED: Optional, no crash outside Telegram
+    let tg;
+    if (typeof Telegram !== 'undefined') {
+      tg = Telegram.WebApp;
+      tg.ready();
+      tg.expand();
+    }
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      player.x = canvas.width / 2;  // Reset player on resize
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // Game variables
+    let player = { x: canvas.width/2, y: canvas.height-100, size:30, speed:5 };
+    let bullets = [];
+    let enemies = [];
+    let score = 0;
+    let gameOver = false;
+    let touchX = null;
+    let mousePressed = false;
+
+    // Input - Touch/Mouse handling
+    function handleStart(e) {
+      e.preventDefault();
+      if (e.touches && e.touches.length > 0) {
+        touchX = e.touches[0].clientX;
+      } else {
+        touchX = e.clientX;
+        mousePressed = true;
+      }
+    }
+
+    function handleMove(e) {
+      e.preventDefault();
+      if (e.touches && e.touches.length > 0) {
+        touchX = e.touches[0].clientX;
+      } else if (mousePressed) {
+        touchX = e.clientX;
+      }
+    }
+
+    function handleEnd(e) {
+      e.preventDefault();
+      touchX = null;
+      mousePressed = false;
+    }
+
+    canvas.addEventListener('touchstart', handleStart, {passive: false});
+    canvas.addEventListener('touchmove', handleMove, {passive: false});
+    canvas.addEventListener('touchend', handleEnd, {passive: false});
+    canvas.addEventListener('touchcancel', handleEnd, {passive: false});
+
+    canvas.addEventListener('mousedown', handleStart);
+    canvas.addEventListener('mousemove', handleMove);
+    canvas.addEventListener('mouseup', handleEnd);
+    canvas.addEventListener('mouseleave', handleEnd);
+
+    // Bullet class
+    class Bullet {
+      constructor(x,y) { this.x=x; this.y=y; this.size=8; this.speed=10; }
+      update() { this.y -= this.speed; }
+      draw() { 
+        ctx.fillStyle='#0f0'; 
+        ctx.beginPath(); 
+        ctx.arc(this.x,this.y,this.size,0,Math.PI*2); 
+        ctx.fill(); 
+      }
+    }
+
+    // Enemy class
+    class Enemy {
+      constructor() {
+        this.size = 25 + Math.random()*20;
+        this.x = Math.random()*(canvas.width-this.size*2)+this.size;
+        this.y = -this.size;
+        this.speed = 2 + Math.random()*2;
+      }
+      update() { this.y += this.speed; }
+      draw() { 
+        ctx.fillStyle='#f33'; 
+        ctx.beginPath(); 
+        ctx.arc(this.x,this.y,this.size,0,Math.PI*2); 
+        ctx.fill(); 
+      }
+    }
+
+    // Spawn enemies every 800ms
+    setInterval(() => {
+      if (!gameOver) enemies.push(new Enemy());
+    }, 800);
+
+    // Auto-shoot when holding/touching
+    setInterval(() => {
+      if (!gameOver && (touchX !== null || mousePressed)) {
+        bullets.push(new Bullet(player.x, player.y - player.size));
+      }
+    }, 150);
+
+    // Game loop
+    function loop() {
+      // Clear screen with stars bg
+      ctx.fillStyle='#001';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+
+      // Player movement
+      if (touchX !== null) {
+        player.x += (touchX - player.x) * 0.25;  // Smoother lerp
+        player.x = Math.max(player.size, Math.min(canvas.width - player.size, player.x));
+      }
+
+      // Draw player ship
+      ctx.fillStyle='#0ff';
+      ctx.beginPath();
+      ctx.moveTo(player.x, player.y - player.size);
+      ctx.lineTo(player.x - player.size, player.y + player.size);
+      ctx.lineTo(player.x + player.size, player.y + player.size);
+      ctx.closePath();
+      ctx.fill();
+
+      // Update & draw bullets
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        b.update();
+        b.draw();
+        if (b.y < -10) bullets.splice(i, 1);
+      }
+
+      // Update & draw enemies + collisions
+      for (let i = enemies.length - 1; i >= 0; i--) {
+        const e = enemies[i];
+        e.update();
+        e.draw();
+
+        // Player collision
+        if (Math.hypot(e.x - player.x, e.y - player.y) < e.size + player.size) {
+          gameOver = true;
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 40px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2);
+          ctx.font = '20px sans-serif';
+          ctx.fillText('Tap/Click to Restart', canvas.width / 2, canvas.height / 2 + 50);
+          ctx.textAlign = 'left';
+          break;  // Stop loop on death
+        }
+
+        // Bullet collisions
+        for (let j = bullets.length - 1; j >= 0; j--) {
+          const b = bullets[j];
+          if (Math.hypot(e.x - b.x, e.y - b.y) < e.size + b.size) {
+            enemies.splice(i, 1);
+            bullets.splice(j, 1);
+            score += 10;
+            document.getElementById('score').innerText = score;
+            break;
+          }
+        }
+
+        if (e.y > canvas.height + 50) enemies.splice(i, 1);
+      }
+
+      // Restart on input if game over
+      if (gameOver && (touchX !== null || mousePressed)) {
+        score = 0;
+        document.getElementById('score').innerText = 0;
+        bullets = [];
+        enemies = [];
+        gameOver = false;
+        touchX = null;
+        mousePressed = false;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);  // Quick clear
+      }
+
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+</html>
