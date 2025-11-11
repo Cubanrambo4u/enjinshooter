@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Enjin Space Shooter</title>
+  <script src="https://unpkg.com/@walletconnect/modal@2"></script>
+  <script src="https://unpkg.com/@walletconnect/sign-client@2"></script>
+  <script src="https://unpkg.com/@walletconnect/utils@2"></script>
+  <style>
+    body { margin:0; background:#000; overflow:hidden; touch-action:none; }
+    canvas { display:block; }
+    #ui { position:absolute; top:10px; left:10px; color:#fff; font-family:sans-serif; z-index:10; }
+    button { padding:10px; margin:5px; background:#222; color:#0f0; border:1px solid #0f0; }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div>Score: <span id="score">0</span></div>
+    <button id="connectBtn">Connect Enjin Wallet</button>
+    <button id="claimBtn" style="display:none">Claim Reward NFT</button>
+    <div id="walletAddr"></div>
+  </div>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    // Telegram WebApp init
+    const tg = window.Telegram.WebApp;
+    tg.ready();
+    tg.expand();
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // Game variables
+    let player = { x: canvas.width/2, y: canvas.height-100, size:30, speed:5 };
+    let bullets = [];
+    let enemies = [];
+    let score = 0;
+    let gameOver = false;
+    let touchX = player.x;
+
+    // WalletConnect setup (Enjin Wallet supports WC)
+    let wcClient;
+    let session;
+    const projectId = 'YOUR_WALLETCONNECT_PROJECT_ID'; // Get free at walletconnect.com
+    const metadata = { name: 'Enjin Shooter', description: 'Telegram Mini Shooter', url: location.href, icons: [] };
+
+    async function initWC() {
+      const { default: SignClient } = await import('https://unpkg.com/@walletconnect/sign-client@2/dist/index.mjs');
+      wcClient = await SignClient.init({ projectId, metadata });
+    }
+
+    document.getElementById('connectBtn').onclick = async () => {
+      if (!wcClient) await initWC();
+      const { uri, approval } = await wcClient.connect({
+        requiredNamespaces: { eip155: { methods: ['eth_sign'], chains: ['eip155:1'], events: ['connect'] } }
+      });
+      if (uri) {
+        Telegram.WebApp.openLink(`https://walletconnect.com/qr?uri=${encodeURIComponent(uri)}`);
+      }
+      session = await approval();
+      const addr = session.namespaces.eip155.accounts[0].split(':')[2];
+      document.getElementById('walletAddr').innerText = `Connected: ${addr.slice(0,6)}...${addr.slice(-4)}`;
+      document.getElementById('connectBtn').style.display = 'none';
+      document.getElementById('claimBtn').style.display = 'block';
+    };
+
+    document.getElementById('claimBtn').onclick = async () => {
+      alert('Reward claim demo! In real game, send tx to mint ENJ-backed NFT.');
+      // Example tx request (extend with Enjin Platform API for real minting)
+    };
+
+    // Input
+    canvas.addEventListener('touchstart', e => { touchX = e.touches[0].clientX; e.preventDefault(); }, {passive:false});
+    canvas.addEventListener('touchmove', e => { touchX = e.touches[0].clientX; e.preventDefault(); }, {passive:false});
+    canvas.addEventListener('mousedown', () => touchX = null);
+    canvas.addEventListener('mousemove', e => { if(e.buttons===1) touchX = e.clientX; });
+
+    // Bullet class
+    class Bullet {
+      constructor(x,y) { this.x=x; this.y=y; this.size=8; this.speed=10; }
+      update() { this.y -= this.speed; }
+      draw() { ctx.fillStyle='#0f0'; ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.fill(); }
+    }
+
+    // Enemy class
+    class Enemy {
+      constructor() {
+        this.size = 25 + Math.random()*20;
+        this.x = Math.random()*(canvas.width-this.size*2)+this.size;
+        this.y = -this.size;
+        this.speed = 2 + Math.random()*2;
+      }
+      update() { this.y += this.speed; }
+      draw() { ctx.fillStyle='#f33'; ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.fill(); }
+    }
+
+    // Spawn enemies
+    setInterval(() => {
+      if (!gameOver) enemies.push(new Enemy());
+    }, 800);
+
+    // Shooting
+    setInterval(() => {
+      if (!gameOver && (touchX !== null || mousePressed)) {
+        bullets.push(new Bullet(player.x, player.y-20));
+      }
+    }, 150);
+
+    let mousePressed = false;
+    canvas.addEventListener('mousedown', () => mousePressed=true);
+    canvas.addEventListener('mouseup', () => mousePressed=false);
+
+    // Game loop
+    function loop() {
+      ctx.fillStyle='#001';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+
+      // Player movement
+      if (touchX !== null) {
+        player.x += (touchX - player.x) * 0.2;
+      }
+      player.x = Math.max(player.size, Math.min(canvas.width-player.size, player.x));
+
+      // Draw player
+      ctx.fillStyle='#0ff';
+      ctx.beginPath();
+      ctx.moveTo(player.x, player.y-player.size);
+      ctx.lineTo(player.x-player.size, player.y+player.size);
+      ctx.lineTo(player.x+player.size, player.y+player.size);
+      ctx.closePath();
+      ctx.fill();
+
+      // Bullets
+      bullets.forEach((b,i) => {
+        b.update();
+        b.draw();
+        if (b.y < -10) bullets.splice(i,1);
+      });
+
+      // Enemies
+      enemies.forEach((e,i) => {
+        e.update();
+        e.draw();
+
+        // Collision player
+        if (Math.hypot(e.x-player.x, e.y-player.y) < e.size+player.size) {
+          gameOver = true;
+          ctx.fillStyle='#fff';
+          ctx.font='40px sans-serif';
+          ctx.fillText('GAME OVER', canvas.width/2-150, canvas.height/2);
+          ctx.font='20px sans-serif';
+          ctx.fillText('Tap to restart', canvas.width/2-80, canvas.height/2+50);
+        }
+
+        // Collision bullets
+        bullets.forEach((b,j) => {
+          if (Math.hypot(e.x-b.x, e.y-b.y) < e.size+b.size) {
+            enemies.splice(i,1);
+            bullets.splice(j,1);
+            score += 10;
+            document.getElementById('score').innerText = score;
+          }
+        });
+
+        if (e.y > canvas.height+50) enemies.splice(i,1);
+      });
+
+      if (gameOver && (touchX !== null || mousePressed)) {
+        // Restart
+        score=0;
+        document.getElementById('score').innerText=0;
+        bullets=[]; enemies=[]; gameOver=false;
+      }
+
+      requestAnimationFrame(loop);
+    }
+    loop();
+
+    // Restart on tap when game over
+    canvas.addEventListener('touchstart', () => { if(gameOver) { touchX = canvas.width/2; } });
+  </script>
+</body>
+</html>
